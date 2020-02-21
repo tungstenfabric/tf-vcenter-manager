@@ -2,15 +2,17 @@ from builtins import object
 import logging
 from abc import ABCMeta, abstractmethod
 
-from pyVmomi import vim, vmodl  # pylint: disable=no-name-in-module
+from pyVmomi import vim, vmodl
 from future.utils import with_metaclass
+
+from cvm import exceptions
 
 logger = logging.getLogger(__name__)
 
 
 class VmwareController(object):
-    def __init__(self, vm_service, vn_service, vmi_service, vrouter_port_service,
-                 vlan_id_service, update_handler, lock):
+    def __init__(self, vm_service, vn_service, vmi_service,
+                 vrouter_port_service, vlan_id_service, update_handler, lock):
         self._vm_service = vm_service
         self._vn_service = vn_service
         self._vmi_service = vmi_service
@@ -50,6 +52,14 @@ class UpdateHandler(object):
 
 
 class AbstractChangeHandler(with_metaclass(ABCMeta, object)):
+    def __init__(self, vm_service=None, vn_service=None, vmi_service=None,
+                 vrouter_port_service=None, vlan_id_service=None):
+        self._vm_service = vm_service
+        self._vn_service = vn_service
+        self._vmi_service = vmi_service
+        self._vrouter_port_service = vrouter_port_service
+        self._vlan_id_service = vlan_id_service
+
     def handle_change(self, obj, property_change):
         name = getattr(property_change, 'name', None)
         value = getattr(property_change, 'val', None)
@@ -59,6 +69,8 @@ class AbstractChangeHandler(with_metaclass(ABCMeta, object)):
                     self._handle_change(obj, value)
                 except vmodl.fault.ManagedObjectNotFound:
                     self._log_managed_object_not_found(value)
+                except exceptions.CVMError:
+                    raise
                 except Exception as exc:
                     logger.error('Unexpected exception: %s during handling %s', exc, value, exc_info=True)
 
@@ -113,6 +125,8 @@ class AbstractEventHandler(with_metaclass(ABCMeta, AbstractChangeHandler)):
                 self._handle_event(value)
             except vmodl.fault.ManagedObjectNotFound:
                 self._log_managed_object_not_found(value)
+            except exceptions.CVMError:
+                raise
             except Exception as exc:
                 logger.error('Unexpected exception: %s during handling %s for VM: %s',
                              exc, value, value.vm.name, exc_info=True)
@@ -142,13 +156,6 @@ class VmUpdatedHandler(AbstractEventHandler):
         vim.event.VmMacAssignedEvent,
     )
 
-    def __init__(self, vm_service, vn_service, vmi_service, vrouter_port_service, vlan_id_service):
-        self._vm_service = vm_service
-        self._vn_service = vn_service
-        self._vmi_service = vmi_service
-        self._vrouter_port_service = vrouter_port_service
-        self._vlan_id_service = vlan_id_service
-
     def _handle_event(self, event):
         if not self._validate_event(event):
             return
@@ -162,13 +169,6 @@ class VmUpdatedHandler(AbstractEventHandler):
 
 class VmRegisteredHandler(AbstractEventHandler):
     EVENTS = (vim.event.VmRegisteredEvent,)
-
-    def __init__(self, vm_service, vn_service, vmi_service, vrouter_port_service, vlan_id_service):
-        self._vm_service = vm_service
-        self._vn_service = vn_service
-        self._vmi_service = vmi_service
-        self._vrouter_port_service = vrouter_port_service
-        self._vlan_id_service = vlan_id_service
 
     def _handle_event(self, event):
         if not self._validate_event(event):
@@ -186,11 +186,6 @@ class VmRegisteredHandler(AbstractEventHandler):
 class VmRenamedHandler(AbstractEventHandler):
     EVENTS = (vim.event.VmRenamedEvent,)
 
-    def __init__(self, vm_service, vmi_service, vrouter_port_service):
-        self._vm_service = vm_service
-        self._vmi_service = vmi_service
-        self._vrouter_port_service = vrouter_port_service
-
     def _handle_event(self, event):
         if not self._validate_event(event):
             return
@@ -207,13 +202,6 @@ class VmRenamedHandler(AbstractEventHandler):
 
 class VmReconfiguredHandler(AbstractEventHandler):
     EVENTS = (vim.event.VmReconfiguredEvent,)
-
-    def __init__(self, vm_service, vn_service, vmi_service, vrouter_port_service, vlan_id_service):
-        self._vm_service = vm_service
-        self._vn_service = vn_service
-        self._vmi_service = vmi_service
-        self._vrouter_port_service = vrouter_port_service
-        self._vlan_id_service = vlan_id_service
 
     def _handle_event(self, event):
         if not self._validate_event(event):
@@ -243,12 +231,6 @@ class VmReconfiguredHandler(AbstractEventHandler):
 class VmRemovedHandler(AbstractEventHandler):
     EVENTS = (vim.event.VmRemovedEvent,)
 
-    def __init__(self, vm_service, vmi_service, vrouter_port_service, vlan_id_service):
-        self._vm_service = vm_service
-        self._vmi_service = vmi_service
-        self._vrouter_port_service = vrouter_port_service
-        self._vlan_id_service = vlan_id_service
-
     def _handle_event(self, event):
         if not self._validate_event(event):
             return
@@ -266,10 +248,6 @@ class VmRemovedHandler(AbstractEventHandler):
 class GuestNetHandler(AbstractChangeHandler):
     PROPERTY_NAME = 'guest.net'
 
-    def __init__(self, vmi_service, vrouter_port_service):
-        self._vmi_service = vmi_service
-        self._vrouter_port_service = vrouter_port_service
-
     def _handle_change(self, obj, value):
         for nic_info in value:
             self._vmi_service.update_nic(nic_info)
@@ -281,9 +259,6 @@ class GuestNetHandler(AbstractChangeHandler):
 
 class VmwareToolsStatusHandler(AbstractChangeHandler):
     PROPERTY_NAME = 'guest.toolsRunningStatus'
-
-    def __init__(self, vm_service):
-        self._vm_service = vm_service
 
     def _handle_change(self, obj, value):
         if not self._validate_vm(obj):
@@ -299,11 +274,6 @@ class VmwareToolsStatusHandler(AbstractChangeHandler):
 
 class PowerStateHandler(AbstractChangeHandler):
     PROPERTY_NAME = 'runtime.powerState'
-
-    def __init__(self, vm_service, vrouter_port_service, vlan_id_service):
-        self._vm_service = vm_service
-        self._vrouter_port_service = vrouter_port_service
-        self._vlan_id_service = vlan_id_service
 
     def _handle_change(self, obj, value):
         if not self._validate_vm(obj):
