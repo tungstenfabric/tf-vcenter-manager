@@ -1,4 +1,5 @@
 # pylint: disable=redefined-outer-name
+import mock
 import pytest
 from mock import Mock, patch
 from vnc_api import vnc_api
@@ -56,7 +57,8 @@ def dvs_1(dv_port_1, dv_port_2, dv_port_3):
 
 @pytest.fixture()
 def vcenter_api_client():
-    return VCenterAPIClient({})
+    with mock.patch("cvm.clients.SmartConnectNoSSL"):
+        return VCenterAPIClient({})
 
 
 @pytest.fixture()

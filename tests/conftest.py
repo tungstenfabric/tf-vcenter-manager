@@ -447,29 +447,41 @@ def vmware_tools_running_update(vmware_vm_1):
 
 
 @pytest.fixture()
-def vm_service(esxi_api_client, vcenter_api_client, vnc_api_client, database):
-    return VirtualMachineService(esxi_api_client, vcenter_api_client, vnc_api_client, database)
+def service_kwargs(esxi_api_client, vcenter_api_client, vnc_api_client,
+                   vrouter_api_client, database, vlan_id_pool):
+    return {
+        "esxi_api_client": esxi_api_client,
+        "vcenter_api_client": vcenter_api_client,
+        "vnc_api_client": vnc_api_client,
+        "vrouter_api_client": vrouter_api_client,
+        "database": database,
+        "vlan_id_pool": vlan_id_pool,
+    }
 
 
 @pytest.fixture()
-def vn_service(vcenter_api_client, vnc_api_client, database):
-    return VirtualNetworkService(vcenter_api_client, vnc_api_client, database)
+def vm_service(service_kwargs):
+    return VirtualMachineService(**service_kwargs)
 
 
 @pytest.fixture()
-def vmi_service(esxi_api_client, vcenter_api_client, vnc_api_client, database, vlan_id_pool):
-    return VirtualMachineInterfaceService(vcenter_api_client, vnc_api_client,
-                                          database, esxi_api_client, vlan_id_pool=vlan_id_pool)
+def vn_service(service_kwargs):
+    return VirtualNetworkService(**service_kwargs)
 
 
 @pytest.fixture()
-def vrouter_port_service(vrouter_api_client, database):
-    return VRouterPortService(vrouter_api_client, database)
+def vmi_service(service_kwargs):
+    return VirtualMachineInterfaceService(**service_kwargs)
 
 
 @pytest.fixture()
-def vlan_id_service(vcenter_api_client, esxi_api_client, vlan_id_pool, database):
-    vlan_id_service = VlanIdService(vcenter_api_client, esxi_api_client, vlan_id_pool, database)
+def vrouter_port_service(service_kwargs):
+    return VRouterPortService(**service_kwargs)
+
+
+@pytest.fixture()
+def vlan_id_service(service_kwargs):
+    vlan_id_service = VlanIdService(**service_kwargs)
     vlan_id_service._wait_for_proxy_host = Mock(return_value=True)
     vlan_id_service._wait_for_device_connected = Mock(return_value=True)
     return vlan_id_service
@@ -489,15 +501,22 @@ def vrouter_api_client():
 
 @pytest.fixture()
 def controller(vm_service, vn_service, vmi_service, vrouter_port_service, vlan_id_service, lock):
+    handler_kwargs = {
+        "vm_service": vm_service,
+        "vn_service": vn_service,
+        "vmi_service": vmi_service,
+        "vrouter_port_service": vrouter_port_service,
+        "vlan_id_service": vlan_id_service,
+    }
     handlers = [
-        VmUpdatedHandler(vm_service, vn_service, vmi_service, vrouter_port_service, vlan_id_service),
-        VmRenamedHandler(vm_service, vmi_service, vrouter_port_service),
-        VmReconfiguredHandler(vm_service, vn_service, vmi_service, vrouter_port_service, vlan_id_service),
-        VmRemovedHandler(vm_service, vmi_service, vrouter_port_service, vlan_id_service),
-        VmRegisteredHandler(vm_service, vn_service, vmi_service, vrouter_port_service, vlan_id_service),
-        GuestNetHandler(vmi_service, vrouter_port_service),
-        PowerStateHandler(vm_service, vrouter_port_service, vlan_id_service),
-        VmwareToolsStatusHandler(vm_service)
+        VmUpdatedHandler(**handler_kwargs),
+        VmRenamedHandler(**handler_kwargs),
+        VmReconfiguredHandler(**handler_kwargs),
+        VmRemovedHandler(**handler_kwargs),
+        VmRegisteredHandler(**handler_kwargs),
+        GuestNetHandler(**handler_kwargs),
+        PowerStateHandler(**handler_kwargs),
+        VmwareToolsStatusHandler(**handler_kwargs),
     ]
     for handler in handlers:
         handler._validate_event = Mock(return_value=True)
