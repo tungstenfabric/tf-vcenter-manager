@@ -1,3 +1,7 @@
+import functools
+import socket
+import types
+
 from builtins import str
 from builtins import next
 from builtins import object
@@ -13,11 +17,13 @@ from uuid import uuid4
 import requests
 from pyVim.connect import Disconnect, SmartConnectNoSSL
 from pyVim.task import WaitForTask
-from pyVmomi import vim, vmodl  # pylint: disable=no-name-in-module
+from pyVmomi import vim, vmodl
 from vnc_api import vnc_api
 from vnc_api.exceptions import NoIdError, RefsExistError
 
 from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
+
+from cvm import exceptions
 from cvm.constants import (ID_PERMS_CREATOR, VM_PROPERTY_FILTERS, VNC_ROOT_DOMAIN,
                            VNC_VCENTER_DEFAULT_SG, VNC_VCENTER_DEFAULT_SG_FQN,
                            VNC_VCENTER_IPAM, VNC_VCENTER_IPAM_FQN,
@@ -25,6 +31,40 @@ from cvm.constants import (ID_PERMS_CREATOR, VM_PROPERTY_FILTERS, VNC_ROOT_DOMAI
 from cvm.models import find_vrouter_uuid
 
 logger = logging.getLogger(__name__)
+
+
+def raises_connection_error(func, msg):
+    @functools.wraps(func)
+    def wrapper_raises_socket_error(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (socket.error, OSError):
+            raise exceptions.APIClientConnectionLostError(msg)
+
+    return wrapper_raises_socket_error
+
+
+def api_client_error_translator(decorator, msg):
+    def decorate(cls):
+        try:
+            # Works in Python 3.6
+            from inspect import getattr_static
+            for attr in vars(cls):
+                if callable(getattr(cls, attr)) and not isinstance(
+                    getattr_static(cls, attr), staticmethod
+                ):
+                    setattr(cls, attr, decorator(getattr(cls, attr), msg))
+        except ImportError:
+            # Works in Python 2.7
+            for attr in vars(cls):
+                if callable(getattr(cls, attr)) and not isinstance(
+                    getattr(cls, attr), types.FunctionType
+                ):
+                    setattr(cls, attr, decorator(getattr(cls, attr), msg))
+
+        return cls
+
+    return decorate
 
 
 class VSphereAPIClient(object):
@@ -49,6 +89,7 @@ class VSphereAPIClient(object):
             return None
 
 
+@api_client_error_translator(raises_connection_error, "Connection to ESXi lost.")
 class ESXiAPIClient(VSphereAPIClient):
     def __init__(self, esxi_cfg):
         super(ESXiAPIClient, self).__init__()
@@ -143,6 +184,7 @@ def make_filter_spec(obj, filters):
     return filter_spec
 
 
+@api_client_error_translator(raises_connection_error, "Connection to vCenter lost.")
 class VCenterAPIClient(VSphereAPIClient):
     WAITING_TIMEOUT = 20
     WAITING_SLEEP = 3
@@ -151,6 +193,7 @@ class VCenterAPIClient(VSphereAPIClient):
         super(VCenterAPIClient, self).__init__()
         self._vcenter_cfg = vcenter_cfg
         self._dvs = None
+        self._test_connection()
 
     def __enter__(self):
         self._si = SmartConnectNoSSL(
@@ -277,6 +320,9 @@ class VCenterAPIClient(VSphereAPIClient):
             vm_name = vm_name.split('/')[-2]
         return self._get_object([vim.VirtualMachine], vm_name)
 
+    def _test_connection(self):
+        with self:
+            pass
 
 def make_dv_port_spec(dv_port, vlan_id=None):
     dv_port_config_spec = vim.dvs.DistributedVirtualPort.ConfigSpec()
