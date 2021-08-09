@@ -38,7 +38,7 @@ committers:
       email: 'vaidyasd@juniper.net'
       company: 'Juniper'
       id: 'vaidyasd'
-      timezone: 'America/Los_Angeles' 
+      timezone: 'America/Los_Angeles'
 tsc:
     # yamllint disable rule:line-length
     approval: 'https://wiki.tungsten.io/display/TUN/Projects'
