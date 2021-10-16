@@ -62,8 +62,9 @@ sdist_depends = []
 sdist_depends.extend(setup_sources_rules)
 sdist_depends.extend(cvm)
 sdist_depends.extend(cvm_sandesh)
-sdist_gen = env.Command('dist/contrail-vcenter-manager-0.1dev.tar.gz',
-                        'setup.py', cd_cmd + 'python setup.py sdist')
+sdist_gen = env.Command(
+    'dist/contrail-vcenter-manager-%s.tar.gz' % env.GetPyVersion(),
+    'setup.py', cd_cmd + 'python setup.py sdist')
 
 env.Depends(sdist_gen, sdist_depends)
 env.Requires(sdist_gen, '#build/noarch/contrail-vrouter-api/dist/')
