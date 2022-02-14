@@ -2,7 +2,7 @@ gevent==1.2.2
 ipaddress==1.0.19
 mock==2.0.0
 pyvmomi==6.5.0.2017.5.post1
-PyYAML==3.12
+PyYAML==5.4
 requests==2.18.4
 six==1.16.0
 future==0.16.0
